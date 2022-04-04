@@ -73,8 +73,7 @@ if( !vepFile.exists() ) {
 log.info 'Starting workflow.....'
 
 workflow {
-  chr_str = params.chros.toString()
-  chr = Channel.of(chr_str.split(','))
+  chr = Channel.fromPath(params.chros_file).splitText().map{it -> it.trim()}
   splitVCF(chr, params.vcf, vcf_index)
   chrosVEP(splitVCF.out, params.vep_config)
   mergeVCF(chrosVEP.out.vcfFile.collect(), chrosVEP.out.indexFile.collect())
