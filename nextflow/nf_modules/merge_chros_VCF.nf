@@ -41,7 +41,7 @@ process mergeVCF {
   script: 
   """
   bcftools concat ${ vcfFiles } -Oz -o temp-${ mergedVCF}.vcf.gz
-  bcftools sort -Oz temp-${ mergedVCF}.vcf.gz -o ${ mergedVCF}.vcf.gz 
+  bcftools sort -T /nfs/production/flicek/ensembl/variation/liftover/nextflow-results/temp-dir -Oz temp-${ mergedVCF}.vcf.gz -o ${ mergedVCF}.vcf.gz 
   bcftools  index -t ${ mergedVCF}.vcf.gz
   """
 }
