@@ -865,9 +865,10 @@ sub pick_VariationFeatureOverlapAllele_per_gene {
 sub VariationFeature_to_output_hash {
   my $self = shift;
   my $vf = shift;
-
+  my $uploaded_allele_string = $vf->{original_allele_string} || $vf->{allele_string}; 
   my $hash = {
     Uploaded_variation  => $vf->variation_name ne '.' ? $vf->variation_name : ($vf->{original_chr} || $vf->{chr}).'_'.$vf->{start}.'_'.($vf->{allele_string} || $vf->{class_SO_term}),
+    Original_allele     => $uploaded_allele_string,
     Location            => ($vf->{chr} || $vf->seq_region_name).':'.format_coords($vf->{start}, $vf->{end}),
   };
 
@@ -919,7 +920,6 @@ sub VariationFeature_to_output_hash {
 
   # minimised?
   $hash->{MINIMISED} = 1 if $vf->{minimised};
-  
   if(ref($vf) eq 'Bio::EnsEMBL::Variation::VariationFeature') {
     my $ambiguity_code = $vf->ambig_code();
     
@@ -2127,13 +2127,12 @@ sub rejoin_variants_in_InputBuffer {
   $self->{no_stats} = 1;
 
   foreach my $vf(@{$buffer->buffer}) {
-
     # reset original one
     if(defined($vf->{original_allele_string})) {
 
       # do consequence stuff
       $self->get_all_output_hashes_by_VariationFeature($vf);
-
+      print($vf->{original_allele_string});
       $vf->{allele_string}    = $vf->{original_allele_string};
       $vf->{seq_region_start} = $vf->{start} = $vf->{original_start};
       $vf->{seq_region_end}   = $vf->{end}   = $vf->{original_end};
