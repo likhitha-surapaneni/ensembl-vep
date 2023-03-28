@@ -68,7 +68,6 @@ if ( !params.skip_check ){
     exit 1, "The specified VCF file has issues in parsing: $serr"
   }
 }
-vcf_index = "${params.vcf}.tbi"
 
 if ( params.vep_config ){
   vepFile = file(params.vep_config)
@@ -84,7 +83,10 @@ else
 log.info 'Starting workflow.....'
 
 workflow {
-  splitVCF(params.vcf, vcf_index, params.bin_size)
-  runVEP(splitVCF.out.files.transpose(), params.vep_config)
+  input_file = Channel.fromPath( params.vcf, relative: true)
+  vep_config = Channel.fromPath( params.vep_config, relative: true)
+  vcf_index =  Channel.fromPath("${params.vcf}.tbi", relative: true)
+  splitVCF(input_file, vcf_index, params.bin_size)
+  runVEP(splitVCF.out.files.transpose(), vep_config)
   mergeVCF(runVEP.out.vcfFile.collect(), runVEP.out.indexFile.collect())
 }  

@@ -60,7 +60,6 @@ The following config files are used and can be modified depending on user requir
   --output_prefix PREFIX    Output filename prefix. The generated output file will have name <output_prefix>.vcf.gz
   --skip_check [0,1]        Skip checking for tabix index file of input VCF. Enables the first module to load from cache if -resume is used. Default: 0
 ```
-NB: File paths are expected to be absolute paths.
 
 ---
 <a id="example"></a>
