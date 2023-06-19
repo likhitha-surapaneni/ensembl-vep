@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-Copyright [2016-2022] EMBL-European Bioinformatics Institute
+Copyright [2016-2023] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -74,8 +74,9 @@ use Bio::EnsEMBL::Utils::Scalar qw(assert_ref);
 use Bio::EnsEMBL::Utils::Exception qw(throw warning);
 use Bio::EnsEMBL::Utils::Sequence qw(reverse_comp);
 use Bio::EnsEMBL::Variation::Utils::Constants;
+use Bio::EnsEMBL::Variation::Utils::Sequence qw(ga4gh_vrs_from_spdi);
 use Bio::EnsEMBL::Variation::Utils::VariationEffect qw(overlap);
-use Bio::EnsEMBL::VEP::Utils qw(format_coords merge_arrays);
+use Bio::EnsEMBL::VEP::Utils qw(format_coords merge_arrays get_flatten);
 use Bio::EnsEMBL::VEP::Constants;
 
 use Bio::EnsEMBL::VEP::OutputFactory::VEP_output;
@@ -103,11 +104,11 @@ my %FORMAT_MAP = (
 my %DISTANCE_CONS = (upstream_gene_variant => 1, downstream_gene_variant => 1);
 
 my %FREQUENCY_KEYS = (
-  af        => ['AF'],
-  af_1kg    => [qw(AFR AMR ASN EAS EUR SAS)],
-  af_esp    => [qw(AA EA)],
-  af_exac   => [('ExAC', map {'ExAC_'.$_} qw(Adj AFR AMR EAS FIN NFE OTH SAS))],
-  af_gnomad => [('gnomAD', map {'gnomAD_'.$_} qw(AFR AMR ASJ EAS FIN NFE OTH SAS))],
+  af           => ['AF'],
+  af_1kg       => [qw(AF AFR AMR ASN EAS EUR SAS)],
+  af_gnomad    => [('gnomADe', map {'gnomADe_'.$_} qw(AFR AMR ASJ EAS FIN NFE OTH SAS))],
+  af_gnomade    => [('gnomADe', map {'gnomADe_'.$_} qw(AFR AMR ASJ EAS FIN NFE OTH SAS))],
+  af_gnomadg => [('gnomADg', map {'gnomADg_'.$_} qw(AFR AMI AMR ASJ EAS FIN MID NFE OTH SAS))],
 );
 
 
@@ -166,9 +167,9 @@ sub new {
     variant_class
     af
     af_1kg
-    af_esp
-    af_exac
     af_gnomad
+    af_gnomade
+    af_gnomadg
     max_af
     pubmed
     clin_sig_allele
@@ -670,13 +671,15 @@ sub filter_StructuralVariationOverlapAlleles {
   Example    : $picked = $of->pick_worst_VariationFeatureOverlapAllele($vfoas);
   Description: Selects one VariationFeatureOverlapAllele from a list using criteria
                defined in the param pick_order. Criteria are in this default order:
-                1: canonical
-                2: transcript support level
-                3: biotype (protein coding favoured)
-                4: consequence rank
-                5: transcript length
-                6: transcript from Ensembl?
-                7: transcript from RefSeq?
+                1: MANE_Select 
+                2: MANE_Plus_Clinical
+                3: canonical
+                4: transcript support level
+                5: biotype (protein coding favoured)
+                6: consequence rank
+                7: transcript length
+                8: transcript from Ensembl?
+                9: transcript from RefSeq?
   Returntype : Bio::EnsEMBL::Variation::VariationFeatureOverlapAllele
   Exceptions : none
   Caller     : filter_VariationFeatureOverlapAlleles(),
@@ -702,7 +705,8 @@ sub pick_worst_VariationFeatureOverlapAllele {
 
       # these will only be used by transcript types, default to 1 for others
       # to avoid writing an else clause below
-      mane => 1,
+      mane_select => 1,
+      mane_plus_clinical => 1,
       canonical => 1,
       ccds => 1,
       length => 0,
@@ -717,7 +721,8 @@ sub pick_worst_VariationFeatureOverlapAllele {
       my $tr = $vfoa->feature;
 
       # 0 is "best"
-      $info->{mane} = scalar(grep {$_->code eq 'MANE_Select'}  @{$tr->get_all_Attributes()}) ? 0 : 1;
+      $info->{mane_select} = scalar(grep {$_->code eq 'MANE_Select'}  @{$tr->get_all_Attributes()}) ? 0 : 1;
+      $info->{mane_plus_clinical} = scalar(grep {$_->code eq 'MANE_Plus_Clinical'}  @{$tr->get_all_Attributes()}) ? 0 : 1;
       $info->{canonical} = $tr->is_canonical ? 0 : 1;
       $info->{biotype} = $tr->biotype eq 'protein_coding' ? 0 : 1;
       $info->{ccds} = $tr->{_ccds} && $tr->{_ccds} ne '-' ? 0 : 1;
@@ -784,6 +789,7 @@ sub pick_worst_VariationFeatureOverlapAllele {
       # otherwise shrink the array to just those that had the lowest
       # this gives fewer to sort on the next round
       @vfoa_info = @tmp;
+
     }
 
     # probably shouldn't get here, but if we do, return the first
@@ -1101,9 +1107,6 @@ sub add_colocated_frequency_data {
 
   my @ex_alleles = split('/', $ex->{allele_string});
 
-  # gmaf stored a bit differently, but we can get it in the same format
-  $ex->{AF} = $ex->{minor_allele}.':'.$ex->{minor_allele_freq} if $ex->{minor_allele};
-
   my @keys = keys %FREQUENCY_KEYS;
   @keys = grep {$self->{$_}} @keys unless $self->{max_af};
   
@@ -1130,6 +1133,7 @@ sub add_colocated_frequency_data {
       # get the frequencies for each allele into a hashref
       foreach my $pair(split(',', $ex->{$key})) {
         my ($a, $f) = split(':', $pair);
+        $f = sprintf("%.4f", $f) if $key eq 'AF'; # this format is just to keep old compability with dbSNP import
         $freq_data{$a} = $f;
         $total += $f;
         delete $remaining{$a} if $remaining{$a};
@@ -1162,13 +1166,13 @@ sub add_colocated_frequency_data {
 
         # update max_af data if required
         # make sure we don't include any combined-level pops
-        if($self->{max_af} && $key ne 'AF' && $key ne 'ExAC' && $key ne 'ExAC_Adj' && $key ne 'gnomAD') {
+        if($self->{max_af} && $key ne 'AF' && $key ne 'ExAC' && $key ne 'ExAC_Adj' && $key ne 'gnomADe' && $key ne 'gnomADg') {
           if($f > $max_af) {
             $max_af = $f;
             @max_af_pops = ($key);
           }
           elsif($f == $max_af) {
-            push @max_af_pops, $key;
+            push @max_af_pops, $key unless grep{$_ eq $key} @max_af_pops;
           }
         }
       }
@@ -1186,8 +1190,6 @@ sub add_colocated_frequency_data {
     
     push @{$hash->{MAX_AF_POPS}}, @max_af_pops if $max_af >= $current_max;
   }
-
-  delete $ex->{AF};
 
   return $hash;
 }
@@ -1278,22 +1280,22 @@ sub VariationFeatureOverlapAllele_to_output_hash {
       $hash->{HGVSg} = $hgvsg; 
     }
   }
-  # spdi
-  if($self->{spdi}) { 
+  # spdi + ga4gh_vrs
+  if($self->{spdi} || $self->{ga4gh_vrs}) {
     $vf->{_spdi_genomic} = $vf->spdi_genomic(); 
-      
-    if(my $spdi = $vf->{_spdi_genomic}->{$hash->{Allele}}){
-      $hash->{SPDI} = $spdi;  
-    }
-  }
 
-  # ga4gh_vrs
-  if ($self->{ga4gh_vrs}) {
-    $vf->{_ga4gh_spdi_genomic} = $vf->spdi_genomic();
+    if (my $spdi = $vf->{_spdi_genomic}->{$hash->{Allele}}) {
+      $hash->{SPDI} = $spdi if $self->{spdi};
 
-    if (my $ga4gh_spdi = $vf->{_ga4gh_spdi_genomic}->{$hash->{Allele}}) {
-      if ($ga4gh_spdi =~ /^NC/) {
-        $hash->{GA4GH_SPDI} = $ga4gh_spdi;
+      if ($self->{ga4gh_vrs} && $spdi =~ /^NC/) {
+        my $ga4gh_vrs = ga4gh_vrs_from_spdi($spdi);
+        if ($ga4gh_vrs) {
+          throw("ERROR: Cannot use --ga4gh_vrs without JSON module installed\n") unless $CAN_USE_JSON;
+          my $json = JSON->new;
+          # avoid encoding JSON twice in case of returning JSON output format
+          $ga4gh_vrs = $json->encode($ga4gh_vrs) if $self->{output_format} ne 'json';
+          $hash->{GA4GH_VRS} = $ga4gh_vrs;
+        }
       }
     }
   }
@@ -1491,7 +1493,9 @@ sub BaseTranscriptVariationAllele_to_output_hash {
   }
 
   # miRNA structure
-  if($self->{mirna} && (my ($mirna_attrib) = grep {$_->code eq 'ncRNA'} @attribs)) {
+  if($self->{mirna} && $tr->biotype eq 'miRNA' &&
+     (my ($mirna_attrib) = grep {$_->code eq 'ncRNA'} @attribs)) {
+
     my ($start, $end, $struct) = split /\s+|\:/, $mirna_attrib->value;
 
     my ($cdna_start, $cdna_end) = ($tv->cdna_start, $tv->cdna_end);
@@ -1501,7 +1505,6 @@ sub BaseTranscriptVariationAllele_to_output_hash {
       $start && $end && $cdna_start && $cdna_end &&
       overlap($start, $end, $cdna_start, $cdna_end)
     ) {
-
       # account for insertions
       ($cdna_start, $cdna_end) = ($cdna_end, $cdna_start) if $cdna_start > $cdna_end;
     
@@ -2287,19 +2290,41 @@ sub get_custom_headers {
   my @headers;
 
   foreach my $custom(@{$self->header_info->{custom_info} || []}) {
-    push @headers, [$custom->{short_name}, sprintf("%s (%s)", $custom->{file}, $custom->{type})];
     
-    foreach my $field(@{$custom->{fields} || []}) {
+    my @flatten_header = get_flatten(\@headers);
+    my %pos = map { $flatten_header[$_]=~/o/?($flatten_header[$_]=>$_):() } 0..$#flatten_header if @flatten_header;
+
+    if (grep { /^$custom->{short_name}$/ }  @flatten_header){
+      my $pos = $pos{$custom->{short_name}} / 2;
+      $headers[$pos][1] .= ",$custom->{file}";
+    } else {
       push @headers, [
-        sprintf("%s_%s", $custom->{short_name}, $field),
-        sprintf("%s field from %s", $field, $custom->{file})
+        $custom->{short_name},
+        sprintf("%s", $custom->{file})
       ];
+    }
+
+    foreach my $field(@{$custom->{fields} || []}) {
+      my $sub_id = sprintf("%s_%s", $custom->{short_name}, $field);
+      if (grep { /^$sub_id$/ } @flatten_header){
+        my $pos = $pos{$sub_id} / 2;
+        $headers[$pos][1] .= ",$custom->{file}";
+      } elsif ($field eq "PC") {
+        push @headers, [
+          $sub_id,
+          sprintf("Percentage of input variant covered by reference variant from %s", $custom->{file})
+        ];
+      } else {
+        push @headers, [
+          $sub_id,
+          sprintf("%s field from %s", $field, $custom->{file})
+        ];
+      }
     }
   }
 
   return \@headers;
 }
-
 
 =head2 flag_fields
 
@@ -2334,6 +2359,24 @@ sub flag_fields {
   }
 
   return \@return;
+}
+
+
+=head2 get_full_command
+
+  Example    : $headers = $of->get_full_command();
+  Description: Get headers from custom data files
+  Returntype : arrayref of arrayrefs [$key, $header]
+  Exceptions : none
+  Caller     : description_headers() in child classes
+  Status     : Stable
+
+=cut
+
+sub get_full_command {
+  my $self = shift;
+
+  return $self->{_config}->{_params}->{full_command} || "";
 }
 
 1;

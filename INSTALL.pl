@@ -3,7 +3,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2022] EMBL-European Bioinformatics Institute
+Copyright [2016-2023] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,6 +58,7 @@ our (
   $CACHE_URL,
   $CACHE_URL_INDEXED,
   $CACHE_DIR,
+  $NO_PLUGINS,
   $PLUGINS,
   $PLUGIN_URL,
   $PLUGINS_DIR,
@@ -146,30 +147,77 @@ my $VEP_MODULE_NAME = 'ensembl-vep';
 
 our (@store_species, @indexes, @files, $ftp, $dirname);
 
+my $config = {};
 GetOptions(
-  'DESTDIR|d=s'        => \$DEST_DIR,
-  'VERSION|v=i'        => \$API_VERSION, # Deprecated
-  'CACHE_VERSION|e=i'  => \$DATA_VERSION,
-  'ASSEMBLY|y=s'       => \$ASSEMBLY,
-  'BIOPERL|b=s'        => \$BIOPERL_URL,
-  'CACHEURL|u=s'       => \$CACHE_URL,
-  'CACHEDIR|c=s'       => \$CACHE_DIR,
-  'FASTAURL|f=s'       => \$FASTA_URL,
-  'HELP|h'             => \$HELP,
-  'NO_UPDATE|n'        => \$NO_UPDATE,
-  'SPECIES|s=s'        => \$SPECIES,
-  'PLUGINS|g=s'        => \$PLUGINS,
-  'PLUGINSDIR|r=s'     => \$PLUGINS_DIR,
-  'PLUGINURL=s'        => \$PLUGIN_URL,
-  'AUTO|a=s'           => \$AUTO,
-  'QUIET|q'            => \$QUIET,
-  'PREFER_BIN|p'       => \$PREFER_BIN,
-  'CONVERT|t'          => \$CONVERT,
-  'TEST'               => \$TEST,
-  'NO_HTSLIB|l'        => \$NO_HTSLIB,
-  'NO_TEST'            => \$NO_TEST,
-  'NO_BIOPERL'         => \$NO_BIOPERL
+  $config,
+  'DESTDIR|d=s',
+  'CACHE_VERSION|e=i',
+  'ASSEMBLY|y=s',
+  'BIOPERL|b=s',
+  'CACHEURL|u=s',
+  'CACHEDIR|c=s',
+  'FASTAURL|f=s',
+  'HELP|h',
+  'NO_UPDATE|n',
+  'SPECIES|s=s',
+  'NO_PLUGINS',
+  'PLUGINS|g=s',
+  'PLUGINSDIR|r=s',
+  'PLUGINURL=s',
+  'AUTO|a=s',
+  'QUIET|q',
+  'PREFER_BIN|p',
+  'CONVERT|t',
+  'TEST',
+  'NO_HTSLIB|l',
+  'NO_TEST',
+  'NO_BIOPERL'
 ) or die("ERROR: Failed to parse arguments");
+
+# Read configuration from environment variables starting with VEP_
+# Priority is given to command-line arguments
+sub read_config_from_environment {
+  my $config = shift;
+
+  for my $key (keys %ENV) {
+    # Look for environment variables that start with VEP_
+    next unless $key =~ "^VEP_";
+
+    # Avoid setting empty strings
+    my $value = $ENV{$key};
+    next if $value eq "";
+    $key =~ s/^VEP_//ig;
+
+    # Prioritise previous values
+    $config->{$key} ||= $value;
+  }
+  return $config;
+}
+$config = read_config_from_environment($config);
+
+# Quick fix: this script should use $config instead of multiple global variables
+$DEST_DIR     ||=  $config->{DESTDIR};
+$DATA_VERSION ||=  $config->{CACHE_VERSION};
+$ASSEMBLY     ||=  $config->{ASSEMBLY};
+$BIOPERL_URL  ||=  $config->{BIOPERL};
+$CACHE_URL    ||=  $config->{CACHEURL};
+$CACHE_DIR    ||=  $config->{CACHEDIR};
+$FASTA_URL    ||=  $config->{FASTAURL};
+$HELP         ||=  $config->{HELP};
+$NO_UPDATE    ||=  $config->{NO_UPDATE};
+$SPECIES      ||=  $config->{SPECIES};
+$NO_PLUGINS   ||=  $config->{NO_PLUGINS};
+$PLUGINS      ||=  $config->{PLUGINS};
+$PLUGINS_DIR  ||=  $config->{PLUGINSDIR};
+$PLUGIN_URL   ||=  $config->{PLUGINURL};
+$AUTO         ||=  $config->{AUTO};
+$QUIET        ||=  $config->{QUIET};
+$PREFER_BIN   ||=  $config->{PREFER_BIN};
+$CONVERT      ||=  $config->{CONVERT};
+$TEST         ||=  $config->{TEST};
+$NO_HTSLIB    ||=  $config->{NO_HTSLIB};
+$NO_TEST      ||=  $config->{NO_TEST};
+$NO_BIOPERL   ||=  $config->{NO_BIOPERL};
 
 # load version data
 our $CURRENT_VERSION_DATA = get_version_data($RealBin.'/.version');
@@ -213,9 +261,9 @@ $FTP_USER     ||= 'anonymous';
 ## Set the indexed cache url if it's been overwritten by the user
 $CACHE_URL_INDEXED = $CACHE_URL;
 
-$CACHE_URL  ||= "ftp://ftp.ensembl.org/pub/release-$DATA_VERSION/variation/vep";
-$CACHE_URL_INDEXED  ||= "ftp://ftp.ensembl.org/pub/release-$DATA_VERSION/variation/indexed_vep_cache";
-$FASTA_URL  ||= "ftp://ftp.ensembl.org/pub/release-$DATA_VERSION/fasta/";
+$CACHE_URL  ||= "https://ftp.ensembl.org/pub/release-$DATA_VERSION/variation/vep";
+$CACHE_URL_INDEXED  ||= "https://ftp.ensembl.org/pub/release-$DATA_VERSION/variation/indexed_vep_cache";
+$FASTA_URL  ||= "https://ftp.ensembl.org/pub/release-$DATA_VERSION/fasta/";
 $PLUGIN_URL ||= 'https://raw.githubusercontent.com/Ensembl/VEP_plugins';
 
 # using PREFER_BIN can save memory when extracting archives
@@ -270,13 +318,22 @@ if($AUTO) {
 }
 
 else {
-  print "\nHello! This installer is configured to install v$API_VERSION of the Ensembl API for use by the VEP.\nIt will not affect any existing installations of the Ensembl API that you may have.\n\nIt will also download and install cache files from Ensembl's FTP server.\n\n" unless $QUIET;
+  my $api_msg = 
+      " - Install v$API_VERSION of the Ensembl API for use by the VEP. " .
+      "It will not affect any existing installations of the Ensembl API that you may have.\n";
+
+  print "Hello! This installer will help you set up VEP v$API_VERSION, including:\n" .
+    ($NO_UPDATE ? "" : $api_msg) .
+    " - Download and install cache files from Ensembl's FTP server.\n" .
+    " - Download FASTA files from Ensembl's FTP server.\n" .
+    ($NO_PLUGINS ? "" : " - Download VEP plugins.\n") . "\n"
+    unless $QUIET;
 
   # run subs
-  api() if check_api();
+  api()     if check_api();
   cache();
   fasta();
-  plugins();
+  plugins() unless $NO_PLUGINS;
 }
 
 
@@ -327,26 +384,6 @@ sub update() {
   $default_branch_number =~ s/release\/// if $default_branch_number;
 
   my $current_branch = $CURRENT_VERSION_DATA->{'ensembl-vep'}->{release};
-
-  # Check if the $API_VERSION has been set by the deprecated "--VERSION" flag
-  my $api_branch  = $API_VERSION;
-     $api_branch  =~ s/release\///;
-
-  # branch provided by the "--VERSION" flag
-  if ($api_branch != $current_branch) {
-    print "The 'VERSION' installation flag has been deprecated.\n\n";
-    my $branch = looks_like_number($API_VERSION) ? 'release/'.$API_VERSION : $API_VERSION;
-    if(`which git` && -d $RealBin.'/.git') {
-      print "Please, use git to update '$module' using the commands:\n\n";
-      print "\tgit pull\n";
-      print "\tgit checkout $branch\n\n";
-    }
-    else {
-      print "Please, re-download '$module' with the desired version.\n\n";
-    }
-    print "Exit VEP install script\n";
-    exit(0);
-  }
 
   my $message;
 
@@ -401,6 +438,12 @@ sub update() {
 
 # CHECKS DIR SETUP AND PATHS ETC
 ################################
+
+sub is_url {
+  my $url = shift;
+  return $url =~ /^(http|ftp)/i;
+}
+
 sub check_default_dir {
   my $this_os =  $^O;
   my $default_dir_used;
@@ -502,6 +545,7 @@ sub api() {
 # CHECK EXISTING
 ################
 sub check_api() {
+  return 0 if $NO_UPDATE;
   print "Checking for installed versions of the Ensembl API..." unless $QUIET;
 
   my $has_api = {};
@@ -1032,6 +1076,28 @@ sub test() {
 
 # CACHE FILES
 #############
+
+sub format_file_size {
+  # Format $size (in bytes) based on most adequate unit, e.g.:
+  #             0 =>   0 bytes
+  #           421 => 421 bytes
+  #          1000 =>   1 KB
+  #     432340000 => 432 MB
+  #   62340002001 =>  62 GB
+  # 3126340002001 =>   3 TB
+  
+  my $size = shift;
+  # Units sorted from the biggest to smallest order of magnitude
+  my @units = ( 'TB', 'GB', 'MB', 'KB', 'bytes' );
+  
+  while (@units) {
+    my $unit = shift @units;
+    # Calculate order of magnitude based on length of @units
+    my $factor = 10 ** ( 3 * scalar @units );
+    return int($size / $factor) . " " . $unit if $size >= $factor || $unit eq "bytes";
+  }
+}
+
 sub cache() {
 
   my $ok;
@@ -1082,12 +1148,10 @@ sub cache() {
   chomp($tabix);
   $tabix ||= "$HTSLIB_DIR/tabix";
   
-  my $num = 1;
-  my $species_list;
   my $URL_TO_USE = (-e $tabix) ? $CACHE_URL_INDEXED : $CACHE_URL;
 
-  if($URL_TO_USE =~ /^ftp/i) {
-    $URL_TO_USE =~ m/(ftp:\/\/)?(.+?)\/(.+)/;
+  if(is_url($URL_TO_USE)) {
+    $URL_TO_USE =~ m/(.*:\/\/)?(.+?)\/(.+)/;
     $ftp = Net::FTP->new($2, Passive => 1) or die "ERROR: Could not connect to FTP host $2\n$@\n";
     $ftp->login($FTP_USER) or die "ERROR: Could not login as $FTP_USER\n$@\n";
     $ftp->binary();
@@ -1123,8 +1187,15 @@ sub cache() {
     @files = sort {($a =~ /homo_sapiens/) <=> ($b =~ /homo_sapiens/) || $a cmp $b} @files;
   }
 
+  my $num = 0;
+  my $species_list;
+  my $size;
+  my $total_size = 0;
   foreach my $file(@files) {
-    $species_list .= $num++." : ".$file."\n";
+    $size = defined $ftp ? $ftp->size($file) : 0;
+    $total_size += $size;
+    $size = $size ? " (" . format_file_size($size) . ")" : "";
+    $species_list .= ++$num . " : $file$size\n";
   }
 
   if($AUTO) {
@@ -1171,7 +1242,11 @@ sub cache() {
     @indexes = sort {$a <=> $b} keys %{{map {$_ => 1} @indexes}};
   }
   else {
-    print "The following species/files are available; which do you want (can specify multiple separated by spaces or 0 for all): \n$species_list\n? ";
+    $total_size = $total_size <= 0 ? "" :
+                    " " . format_file_size($total_size) . " for all";
+    print "The following species/files are available; which do you want " .
+          "(specify multiple separated by spaces or 0 for all): \n".
+          "$species_list\n  Total:$total_size $num files\n\n? ";
     @indexes = split /\s+/, <>;
 
     # user wants all species found
@@ -1234,7 +1309,7 @@ sub cache() {
     }
 
     my $target_file = "$CACHE_DIR/tmp/$file_name";
-    if($URL_TO_USE =~ /^ftp/) {
+    if(is_url($URL_TO_USE)) {
       print " - downloading $URL_TO_USE/$file_path\n" unless $QUIET;
       if(!$TEST) {
         $ftp->get($file_name, $target_file) or download_to_file("$URL_TO_USE/$file_path", $target_file);
@@ -1301,8 +1376,8 @@ sub fasta() {
     }
 
     # change URL to point to last e! version that had GRCh37 downloads
-    elsif($FASTA_URL =~ /ftp/) {
-      print "\nWARNING: Changing FTP URL for GRCh37\n";
+    elsif(is_url($FASTA_URL)) {
+      print "\nWARNING: Changing URL for GRCh37\n";
       $FASTA_URL =~ s/$DATA_VERSION/75/;
     }
   }
@@ -1327,8 +1402,8 @@ sub fasta() {
 
   my @dirs = ();
 
-  if($FASTA_URL =~ /^ftp/i) {
-    $FASTA_URL =~ m/(ftp:\/\/)?(.+?)\/(.+)/;
+  if(is_url($FASTA_URL)) {
+    $FASTA_URL =~ m/(.*:\/\/)?(.+?)\/(.+)/;
     $ftp = Net::FTP->new($2, Passive => 1) or die "ERROR: Could not connect to FTP host $2\n$@\n";
     $ftp->login($FTP_USER) or die "ERROR: Could not login as $FTP_USER\n$@\n";
     $ftp->binary();
@@ -1629,6 +1704,9 @@ sub plugins() {
   # now establish which we are installing
   my (@indexes, @selected_plugins);
 
+  my $plugins_list = "Available plugins: " .
+                     join(",", sort map {$_->{key}} values %by_key) . "\n";
+
   # either from user input
   if(!$AUTO) {
     print "\nThe following plugins are available; which do you want (can specify multiple separated by spaces or 0 for all): \n$plugin_list\n? ";
@@ -1643,27 +1721,24 @@ sub plugins() {
   }
 
   # or from list passed on command line
-  else {
-    if(lc($PLUGINS->[0]) eq 'all' || $PLUGINS->[0] eq '0') {
-      @selected_plugins = sort {$a->{key} cmp $b->{key}} values %by_key;
-    }
-    else {
-      @selected_plugins = map {$by_key{lc($_)}} grep {$by_key{lc($_)}} @$PLUGINS;
-    }
-
+  elsif (lc($PLUGINS->[0]) eq 'list') {
+    # list the plugins and exit
+    print "\n" . $plugins_list;
+    return;
+  } elsif (lc($PLUGINS->[0]) eq 'all' || $PLUGINS->[0] eq '0') {
+    # download all plugins
+    @selected_plugins = sort {$a->{key} cmp $b->{key}} values %by_key;
+  } else {
+    # download specific plugins from command-line arguments
     my @not_found = grep {!$by_key{lc($_)}} @$PLUGINS;
-    if(@not_found) {
-      printf(
-        "\nWARNING: The following plugins have not been found: %s\nAvailable plugins: %s\n",
-        join(",", @not_found),
-        join(",", sort map {$_->{key}} values %by_key)
-      );
-    }
+    warn("\nWARNING: The following plugins have not been found: ",
+         join(",", @not_found) . "\n", $plugins_list, "\n") if @not_found;
+    @selected_plugins = map {$by_key{lc($_)}} grep {$by_key{lc($_)}} @$PLUGINS;
+  }
 
-    if(!@selected_plugins) {
-      printf("\nERROR: No valid plugins given\n");
-      return;
-    }
+  if(!@selected_plugins) {
+    printf("\nERROR: No valid plugins given\n");
+    return;
   }
 
   # store a flag to warn user at end if any plugins require additional setup
@@ -1727,8 +1802,6 @@ sub plugins() {
 
 sub download_to_file {
   my ($url, $file) = @_;
-
-  $url =~ s/([a-z])\//$1\:21\// if $url =~ /ftp/ && $url !~ /\:21/;
 
   if($CAN_USE_CURL) {
     my $response = `curl -s -o $file -w '%{http_code}' --location "$url" `;
@@ -1836,21 +1909,24 @@ Options
 -h | --help        Display this message and quit
 
 -d | --DESTDIR     Set destination directory for API install (default = './')
---CACHE_VERSION    Set data (cache, FASTA) version to install if different from --VERSION (default = $VERSION)
+--CACHE_VERSION    Set data (cache, FASTA) version to install (default = $VERSION)
 -c | --CACHEDIR    Set destination directory for cache files (default = '$ENV{HOME}/.vep/')
 
 -a | --AUTO        Run installer without user prompts. Use "a" (API + Faidx/htslib),
                    "l" (Faidx/htslib only), "c" (cache), "f" (FASTA), "p" (plugins) to specify
                    parts to install e.g. -a ac for API and cache
--n | --NO_UPDATE   Do not check for updates to ensembl-vep
+-n | --NO_UPDATE   Do not check for updates to ensembl-vep or API
 -s | --SPECIES     Comma-separated list of species to install when using --AUTO
 -y | --ASSEMBLY    Assembly name to use if more than one during --AUTO
--g | --PLUGINS     Comma-separated list of plugins to install when using --AUTO
+
+--NO_PLUGINS       Skip plugin installation
+-g | --PLUGINS     Comma-separated list of plugins to install when using --AUTO; you can also
+                   use "list" to list all plugins and "all" to install all available plugins
 -r | --PLUGINSDIR  Set destination directory for VEP plugins files (default = '$ENV{HOME}/.vep/Plugins/')
--q | --QUIET       Don't write any status output when using --AUTO
+-q | --QUIET       Do not write any status output when using --AUTO
 -p | --PREFER_BIN  Use this if the installer fails with out of memory errors
--l | --NO_HTSLIB   Don't attempt to install Faidx/htslib
---NO_BIOPERL       Don't install BioPerl
+-l | --NO_HTSLIB   Do not attempt to install Faidx/htslib
+--NO_BIOPERL       Do not install BioPerl
 
 -t | --CONVERT     Convert downloaded caches to use tabix for retrieving
                    co-located variants (requires tabix)

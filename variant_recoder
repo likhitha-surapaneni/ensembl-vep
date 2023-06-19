@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright [2016-2022] EMBL-European Bioinformatics Institute
+# Copyright [2016-2023] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -100,6 +100,10 @@ main($config);
 
 sub main {
   my $config = shift;
+
+  if($config->{mane_select} && defined($config->{species}) && $config->{species} !~ /homo_sapiens|human/) {
+    die("ERROR: MANE Select is only available for human\n");
+  }
 
   my $vr = Bio::EnsEMBL::VEP::VariantRecoder->new($config);
  

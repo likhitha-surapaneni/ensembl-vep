@@ -1,4 +1,4 @@
-# Copyright [2016-2022] EMBL-European Bioinformatics Institute
+# Copyright [2016-2023] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use warnings;
 
 use Test::More;
 use Test::Exception;
+use Test::Deep;
 use FindBin qw($Bin);
 
 use lib $Bin;
@@ -75,7 +76,7 @@ $of->param('custom', 0);
 delete($of->{field_order});
 delete($of->{fields});
 
-is_deeply(
+cmp_deeply(
   $of->headers(),
   [
     '## ENSEMBL VARIANT EFFECT PREDICTOR v1',
@@ -100,7 +101,8 @@ is_deeply(
     '## DISTANCE : Shortest distance from variant to transcript',
     '## STRAND : Strand of the feature (1/-1)',
     '## FLAGS : Transcript quality flags',
-    '## custom_test : test.vcf.gz (overlap)',
+    '## custom_test : test.vcf.gz',
+    re('\#\# VEP command-line: vep'),
     "#Uploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\tcDNA_position\tCDS_position\tProtein_position\tAmino_acids\tCodons\tExisting_variation\tExtra"
   ],
   'headers'
@@ -111,10 +113,10 @@ my $runner = get_annotated_buffer_runner({
   plugin => ['TestPlugin'],
   quiet => 1,
 });
-is(
+like(
   $runner->get_OutputFactory->headers->[-2].$runner->get_OutputFactory->headers->[-1],
-  "## test : header".
-  "#Uploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\tcDNA_position\tCDS_position\tProtein_position\tAmino_acids\tCodons\tExisting_variation\tExtra",
+  '/\#\# VEP command-line: vep --assembly GRCh38 --cache_version 84 --database 0 --dir \[PATH\]/ (--dir_plugins /plugins )*--input_file \[PATH\]/test.vcf (--no_htslib --no_plugins )*--no_stats (--no_update )*'.
+  '--offline --plugin TestPlugin (--pluginsdir /plugins )*--quiet\#Uploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\tcDNA_position\tCDS_position\tProtein_position\tAmino_acids\tCodons\tExisting_variation\tExtra/',
   'headers - plugin'
 );
 
@@ -213,9 +215,9 @@ is(
   'CANONICAL=YES;TSL=5;CCDS=CCDS33522.1;ENSP=ENSP00000305682;'.
   'SWISSPROT=Q9NYK5;UNIPARC=UPI00001AEAC0;EXON=11/11;'.
   'HGVSc=ENST00000307301.11:c.*18G>A;'.
-  'AF=0.0010;AFR_AF=0.003;AMR_AF=0.0014;EAS_AF=0;EUR_AF=0;SAS_AF=0;AA_AF=0.004998;EA_AF=0;'.
-  'gnomAD_AF=0.0003478;gnomAD_AFR_AF=0.004643;gnomAD_AMR_AF=0.0003236;gnomAD_ASJ_AF=0;'.
-  'gnomAD_EAS_AF=0;gnomAD_FIN_AF=0;gnomAD_NFE_AF=1.886e-05;gnomAD_OTH_AF=0;gnomAD_SAS_AF=0;MAX_AF=0.004998;MAX_AF_POPS=AA',
+  'AF=0.0010;AFR_AF=0.003;AMR_AF=0.0014;EAS_AF=0;EUR_AF=0;SAS_AF=0;'.
+  'gnomADe_AF=0.0003478;gnomADe_AFR_AF=0.004643;gnomADe_AMR_AF=0.0003236;gnomADe_ASJ_AF=0;'.
+  'gnomADe_EAS_AF=0;gnomADe_FIN_AF=0;gnomADe_NFE_AF=1.886e-05;gnomADe_OTH_AF=0;gnomADe_SAS_AF=0;MAX_AF=0.004643;MAX_AF_POPS=gnomADe_AFR',
   'get_all_lines_by_InputBuffer - everything'
 );
 

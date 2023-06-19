@@ -1,4 +1,4 @@
-# Copyright [2016-2022] EMBL-European Bioinformatics Institute
+# Copyright [2016-2023] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -55,14 +55,14 @@ throws_ok { $cfg->read_config_from_file() } qr/Could not open config file/, 'rea
 throws_ok { $cfg->read_config_from_file('does_not_exist') } qr/Could not open config file/, 'read_config_from_file invalid file given';
 ok(my $tmp = $cfg->read_config_from_file($test_cfg->{test_ini_file}), 'read_config_from_file ok');
 
-is($tmp->{test1}, 'hello', 'read_config_from_file basic');
-is($tmp->{test2}, 'foo bar', 'quoted string with spaces');
-is($tmp->{test3}, 'foo', 'read_config_from_file flag not allowed multiple');
-is($tmp->{individual}, 'dave,barry', 'read_config_from_file flag list preserved comma-separated');
-is_deeply($tmp->{plugin}, [qw(foo bar too)], 'read_config_from_file flag allowed multiple');
+is($tmp->{format}, 'ensembl', 'read_config_from_file basic');
+is($tmp->{dir}, '/this/is/a path with spaces', 'quoted string with spaces');
+is($tmp->{terms}, 'display', 'read_config_from_file flag not allowed multiple');
+is($tmp->{fields}, 'Allele,Consequence,Feature_type,Feature', 'read_config_from_file flag list preserved comma-separated');
+is_deeply($tmp->{plugin}, ['test.pm,file=/path/to/test.txt', 'anotherPlugin.pm'], 'read_config_from_file flag allowed multiple');
 
 $cfg->read_config_from_file($test_cfg->{test_ini_file}, $tmp);
-is_deeply($tmp->{plugin}, [qw(foo bar too foo bar too)], 'read_config_from_file flag multiples added not overwritten');
+is_deeply($tmp->{plugin}, [('test.pm,file=/path/to/test.txt', 'anotherPlugin.pm', 'test.pm,file=/path/to/test.txt', 'anotherPlugin.pm')], 'read_config_from_file flag multiples added not overwritten');
 
 
 
@@ -104,11 +104,11 @@ is_deeply(
 
 # give config file
 $cfg = Bio::EnsEMBL::VEP::Config->new({config => $test_cfg->{test_ini_file}});
-is($cfg->param('test1'), 'hello', 'config file');
+is($cfg->param('format'), 'ensembl', 'config file');
 
 # give config file auto-detected as $config->{dir}.'/vep.ini'
 $cfg = Bio::EnsEMBL::VEP::Config->new({dir => $test_cfg->{cache_root_dir}.'/../'});
-is($cfg->param('test1'), 'hello', 'ini file');
+is($cfg->param('format'), 'ensembl', 'ini file');
 
 # list conversion
 $cfg = Bio::EnsEMBL::VEP::Config->new({individual => 'dave,barry,keith'});
@@ -140,7 +140,7 @@ is($cfg->param('quiet'), 1, 'STDOUT output turns on quiet');
 is($cfg->param('verbose'), undef, 'STDOUT output turns off verbose');
 
 $cfg = Bio::EnsEMBL::VEP::Config->new({everything => 1, database => 1});
-is($cfg->param($_), undef, 'everything with database turns off '.$_) for qw(af_1kg af_esp af_exac af_gnomad pubmed);
+is($cfg->param($_), undef, 'everything with database turns off '.$_) for qw(af_1kg af_gnomad pubmed);
 
 #$cfg = Bio::EnsEMBL::VEP::Config->new({species => 'mus_musculus1'});
 #is($cfg->param('species'), 'mus_musculus', '1 getting trimmed from species name');

@@ -22,13 +22,13 @@ RUN apt-get update && apt-get -y install \
 ENV OPT /opt/vep
 ENV OPT_SRC $OPT/src
 ENV HTSLIB_DIR $OPT_SRC/htslib
-ENV BRANCH master
+ENV BRANCH release/109
 
 # Working directory
 WORKDIR $OPT_SRC
 
 # Clone/download repositories/libraries
-RUN if [ "$BRANCH" = "master" ]; \
+RUN if [ "$BRANCH" = "main" ]; \
     then export BRANCH_OPT=""; \
     else export BRANCH_OPT="-b $BRANCH"; \
     fi && \
@@ -115,6 +115,7 @@ ENV MACHTYPE x86_64
 ENV DEPS $OPT_SRC
 ENV PATH $OPT_SRC/ensembl-vep:$OPT_SRC/var_c_code:$PATH
 ENV LANG_VAR en_US.UTF-8
+ENV BRANCH release/109
 
 # Create vep user
 RUN useradd -r -m -U -d "$OPT" -s /bin/bash -c "VEP User" -p '' vep && usermod -a -G sudo vep && mkdir -p $OPT_SRC
@@ -149,7 +150,9 @@ RUN ensembl-vep/travisci/build_c.sh && \
     echo "$LANG_VAR UTF-8" >> /etc/locale.gen && locale-gen en_US.utf8 && \
     /usr/sbin/update-locale LANG=$LANG_VAR && \
     # Copy htslib executables. It also requires the packages 'zlib1g-dev', 'libbz2-dev' and 'liblzma-dev'
-    cp $HTSLIB_DIR/bgzip $HTSLIB_DIR/tabix $HTSLIB_DIR/htsfile /usr/local/bin/
+    cp $HTSLIB_DIR/bgzip $HTSLIB_DIR/tabix $HTSLIB_DIR/htsfile /usr/local/bin/ && \
+    # Remove CPAN cache
+    rm -rf /root/.cpanm
 
 ENV LC_ALL $LANG_VAR
 ENV LANG $LANG_VAR
@@ -158,11 +161,47 @@ ENV LANG $LANG_VAR
 USER vep
 ENV PERL5LIB $PERL5LIB_TMP
 
-# Final steps
-WORKDIR $OPT_SRC/ensembl-vep
+# Setup Docker environment for when users run VEP and INSTALL.pl in Docker image:
+#   - skip VEP updates in INSTALL.pl
+ENV VEP_NO_UPDATE 1
+#   - avoid Faidx/HTSLIB installation in INSTALL.pl
+ENV VEP_NO_HTSLIB 1
+#   - skip plugin installation in INSTALL.pl
+ENV VEP_NO_PLUGINS 1
+#   - set plugins directory for VEP and INSTALL.pl
+ENV VEP_DIR_PLUGINS /plugins
+ENV VEP_PLUGINSDIR $VEP_DIR_PLUGINS
+WORKDIR $VEP_DIR_PLUGINS
+
 # Update bash profile
+WORKDIR $OPT_SRC/ensembl-vep
 RUN echo >> $OPT/.profile && \
     echo PATH=$PATH:\$PATH >> $OPT/.profile && \
     echo export PATH >> $OPT/.profile && \
-    # Run INSTALL.pl and remove the ensemb-vep tests and travis
-    ./INSTALL.pl -a a -l -n && rm -rf t travisci .travis.yml
+    # Install Ensembl API and plugins
+    ./INSTALL.pl --auto ap --plugins all --pluginsdir $VEP_DIR_PLUGINS --no_update --no_htslib && \
+    # Remove the ensemb-vep tests and travis
+    rm -rf t travisci .travis.yml
+
+# Install dependencies for VEP plugins:
+USER root
+ENV PLUGIN_DEPS "https://raw.githubusercontent.com/Ensembl/VEP_plugins/$BRANCH/config"
+#   - Ubuntu packages
+RUN curl -O "$PLUGIN_DEPS/ubuntu-packages.txt" && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    $(sed s/\#.*//g ubuntu-packages.txt) && \
+    rm -rf /var/lib/apt/lists/* ubuntu-packages.txt
+#   - Perl modules
+RUN curl -O "$PLUGIN_DEPS/cpanfile" && \
+    cpanm --installdeps --with-recommends . && \
+    rm -rf /root/.cpanm cpanfile
+#   - Python packages
+RUN curl -O "$PLUGIN_DEPS/requirements.txt" && \
+    python -m pip install --no-cache-dir -r requirements.txt && \
+    rm requirements.txt
+
+# Set working directory as symlink to $OPT/.vep (containing VEP cache and data)
+USER root
+RUN ln -s $OPT/.vep /data
+USER vep
+WORKDIR /data
